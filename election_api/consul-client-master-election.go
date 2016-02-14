@@ -109,9 +109,9 @@ func getSequencer(kv *api.KV, key string) (*sequencer, error) {
 
 // MaybeAcquireLeadership function takes a consul client, KV key string, ttl (in seconds), session name, exit on lock found as well
 // as a DoJob implementation. It tries to acquire a lock by associating a session to the key. If acquired, it attains mastership setting the value of
-// the key to hostname:pid. The DoJobFunc function is run in a go routine. The function runs till it ends voluntarily. The function
-// could be sent a stop signal via the stopCh in which case the DoJobFunc should return.
-// The api leverages the TTL field of sessions. The following text from the consul.io is useful to know
+// the key to hostname:pid. The DoJobFunc implementation is run in a go routine. The function could run till it ends voluntarily. The api could
+// could sent a stop signal via the stopCh in case leadership is lost. In such a situation the DoJobFunc implementaion should return.
+// The api leverages the TTL field of sessions. The following text from the consul.io is useful to know.
 //
 // When creating a session, a TTL can be specified. If the TTL interval expires without being renewed, the session has expired and an invalidation is triggered.
 // This type of failure detector is also known as a heartbeat failure detector. It is less scalable than the gossip based failure detector as it places an
