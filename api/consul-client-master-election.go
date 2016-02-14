@@ -22,17 +22,18 @@ type leader struct {
 	seq                *sequencer    // contains the LockId, sessionID and key. This gives the real leadership state.
 	stopSessionRenewCh chan struct{} // stop session renew channel.
 	stopCh             chan bool     // channel used to send stop signal.
+	errorRetryCount    int8          // Count of errors. We use a threshold against this counter before sending the stop signal.
 }
 
 // DoJob is what needs to be implemented by the users of this library.
 type DoJob interface {
 	// DoJobFunc will be called in a go routine. It takes a stop channel which is a signaling mechanism for the function to return.
 	// The other channel argument is used to indicate that the function has completed processing.
-	DoJobFunc(<-chan bool, chan bool)
+	DoJobFunc(chan bool, chan bool)
 }
 
 // acquireKey tries to acquire a consul key. If successful we attain mastership.
-func acquireKey(cl *api.Client, key string, ttl int, sessionName string) (string, *sequencer, bool) {
+func acquireKey(cl *api.Client, key string, ttl int, sessionName string) (string, *sequencer, bool, error) {
 	session := cl.Session()
 	entry := &api.SessionEntry{
 		TTL:      strconv.Itoa(ttl) + "s", // ttl in seconds
@@ -43,6 +44,7 @@ func acquireKey(cl *api.Client, key string, ttl int, sessionName string) (string
 	id, _, err := session.Create(entry, nil)
 	if err != nil {
 		log.Printf("Error while creating session: %v", err)
+		return "", nil, false, err
 	}
 
 	// Get a handle to the KV API
@@ -59,13 +61,16 @@ func acquireKey(cl *api.Client, key string, ttl int, sessionName string) (string
 	success, _, err := kv.Acquire(p, nil)
 	if err != nil {
 		log.Printf("Error while aquiring key: %v", err)
+		return "", nil, false, err
 	}
-	if !success {
-		return id, nil, success
-	}
+
 	// get the sequencer
-	seq := getSequencer(kv, key)
-	return id, seq, success
+	seq, err := getSequencer(kv, key)
+	if err != nil {
+		log.Printf("Error while retrieving sequencer %v", err)
+		return "", nil, false, err
+	}
+	return id, seq, success, nil
 }
 
 func removeSession(cl *api.Client, id string) {
@@ -85,17 +90,20 @@ func getHostname() (h string) {
 }
 
 // getSequencer gets the lockindex, session id and the key which constitutes the sequencer for the current lock.
-func getSequencer(kv *api.KV, key string) *sequencer {
+func getSequencer(kv *api.KV, key string) (*sequencer, error) {
 	kvPair, _, err := kv.Get(key, nil)
 	if err != nil {
 		log.Println("Can't get the sequencer")
-		return nil
+		return nil, err
+	}
+	if kvPair == nil {
+		return nil, nil
 	}
 	seq := sequencer{}
 	seq.lockIndex = kvPair.LockIndex
 	seq.session = kvPair.Session
 	seq.key = kvPair.Key
-	return &seq
+	return &seq, nil
 }
 
 // MaybeAcquireLeadership function takes a consul client, KV key string, ttl (in seconds), session name, exit on lock found as well
@@ -129,13 +137,17 @@ func MaybeAcquireLeadership(client *api.Client, key string, ttl int, sessionName
 			log.Println("Received done signal, exiting..")
 			return
 		default:
-			id, seq, success := acquireKey(client, key, ttl, sessionName)
+			id, seq, success, err := acquireKey(client, key, ttl, sessionName)
+			if err != nil {
+				l.errorRetryCount++
+				goto LABEL
+			}
 			if success {
 				// Maybe the key/session got removed by administrator. Close the renewperiodic channel.
 				if l.isLeader {
 					close(l.stopSessionRenewCh)
 				}
-				log.Println("Lock acquired. Assuming leadership. Session id: ", id)
+				log.Println("Consul leadership lock acquired. Assuming leadership. Consul session id: ", id)
 
 				stopSessionRenewCh := make(chan struct{})
 				l.stopSessionRenewCh = stopSessionRenewCh
@@ -151,22 +163,26 @@ func MaybeAcquireLeadership(client *api.Client, key string, ttl int, sessionName
 				continue
 			}
 			// We reached here becoz we could not acquire the key although it is possible that we are still the master.
-			log.Println("Lock is already acquired.")
+			log.Println("Consul leadership lock is already acquired.")
 			removeSession(client, id)
 			if !l.isLeader && onLockFoundExit {
 				log.Println("Exiting...")
 				os.Exit(0)
 			}
+		LABEL:
 			if l.isLeader {
-				if seq != nil {
-					if !reflect.DeepEqual(l.seq, seq) {
-						// Lost leadership
-						log.Println("Lost leadership...")
-						close(l.stopCh)
-						close(l.stopSessionRenewCh)
-						l.isLeader = false
-						l.seq = nil
-					}
+				if err != nil && l.errorRetryCount > 0 {
+					log.Println("I might have lost leadership. Sending stop signal..")
+					close(l.stopCh)
+					close(l.stopSessionRenewCh)
+					l.isLeader = false
+					l.seq = nil
+				} else if !reflect.DeepEqual(l.seq, seq) {
+					log.Println("Lost leadership. Sending stop signal...")
+					close(l.stopCh)
+					close(l.stopSessionRenewCh)
+					l.isLeader = false
+					l.seq = nil
 				}
 			}
 			time.Sleep(sleepTime * time.Second)

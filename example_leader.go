@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/consul/api"
@@ -10,30 +11,22 @@ import (
 
 type myJob struct{}
 
-/*
-This will be goProbe implementation
-func (m myJob) DoJobFunc(stopCh <-chan struct{}, doneCh chan bool) {
-	wg.Add(1)
-	go actualFunc(stopCh, doneCh, wg) // inside actualFunc call 'defer wg.Done()'
-	wg.Wait()
-}
-*/
-func doJobFunc(doneCh chan bool) {
-	time.Sleep(2 * time.Minute)
+func doJobFuncNonHAMode(doneCh chan bool, wg sync.WaitGroup) {
+	defer wg.Done()
+	log.Println("Do some stuff")
+	time.Sleep(5 * time.Minute)
 	close(doneCh)
 }
 
-func (m myJob) DoJobFunc(stopCh <-chan bool, doneCh chan bool) {
-	go doJobFunc(doneCh)
-	for {
-		select {
-		case <-stopCh:
-			log.Println("Received stop signal")
-			return
-		default:
-			log.Println("Do some stuff")
-			time.Sleep(2 * time.Second)
-		}
+func (m myJob) DoJobFunc(stopCh chan bool, doneCh chan bool) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go doJobFuncNonHAMode(doneCh, wg)
+	select {
+	case <-stopCh:
+		wg.Wait()
+		log.Println("Received stop signal")
+		return
 	}
 }
 
@@ -46,5 +39,5 @@ func main() {
 		log.Fatalf("Fatal error: %v", err)
 	}
 	j := myJob{}
-	leader_election.MaybeAcquireLeadership(client, "goProbe/leader", 20, "goProbe", true, j)
+	leader_election.MaybeAcquireLeadership(client, "example/leader", 20, "example", false, j)
 }
