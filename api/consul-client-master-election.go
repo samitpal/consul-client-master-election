@@ -1,4 +1,4 @@
-package api
+package election_api
 
 import (
 	"log"
@@ -27,8 +27,9 @@ type leader struct {
 
 // DoJob is what needs to be implemented by the users of this library.
 type DoJob interface {
-	// DoJobFunc will be called in a go routine. It takes a stop channel which is a signaling mechanism for the function to return.
-	// The other channel argument is used to indicate that the function has completed processing.
+	// DoJobFunc will be called in a go routine. It takes a stop channel which is a signaling mechanism used by the caller
+	// for the function to return. The other channel argument is used to indicate to the caller that the function has
+	// completed processing.
 	DoJobFunc(chan bool, chan bool)
 }
 
@@ -110,7 +111,6 @@ func getSequencer(kv *api.KV, key string) (*sequencer, error) {
 // as a DoJob implementation. It tries to acquire a lock by associating a session to the key. If acquired, it attains mastership setting the value of
 // the key to hostname:pid. The DoJobFunc function is run in a go routine. The function runs till it ends voluntarily. The function
 // could be sent a stop signal via the stopCh in which case the DoJobFunc should return.
-//
 // The api leverages the TTL field of sessions. The following text from the consul.io is useful to know
 //
 // When creating a session, a TTL can be specified. If the TTL interval expires without being renewed, the session has expired and an invalidation is triggered.
@@ -119,13 +119,12 @@ func getSequencer(kv *api.KV, key string) (*sequencer, error) {
 // Consul will not expire the session before the TTL is reached, but it is allowed to delay the expiration past the TTL. The TTL is renewed on session creation,
 // on session renew, and on leader failover. When a TTL is being used, clients should be aware of clock skew issues: namely, time may not progress at the same
 // rate on the client as on the Consul servers. It is best to set conservative TTL values and to renew in advance of the TTL to account for network delay and time skew.
-
+//
 // The final nuance is that sessions may provide a lock-delay. This is a time duration, between 0 and 60 seconds. When a session invalidation takes place,
 // Consul prevents any of the previously held locks from being re-acquired for the lock-delay interval; this is a safeguard inspired by Google's Chubby.
 // The purpose of this delay is to allow the potentially still live leader to detect the invalidation and stop processing requests that may lead to inconsistent state.
 // While not a bulletproof method, it does avoid the need to introduce sleep states into application logic and can help mitigate many issues.
 //While the default is to use a 15 second delay, clients are able to disable this mechanism by providing a zero delay value.
-
 func MaybeAcquireLeadership(client *api.Client, key string, ttl int, sessionName string, onLockFoundExit bool, j DoJob) {
 	l := leader{}
 	sleepTime := time.Duration(ttl)

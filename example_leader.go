@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/consul/api"
-	leader_election "github.com/samitpal/consul-client-master-election/api"
+	leader_election "github.com/samitpal/consul-client-master-election/election_api"
 )
 
 type myJob struct{}
