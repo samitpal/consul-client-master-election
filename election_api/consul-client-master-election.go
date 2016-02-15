@@ -30,7 +30,7 @@ type DoJob interface {
 	// DoJobFunc will be called in a go routine. It takes a stop channel which is a signaling mechanism used by the caller
 	// for the function to return. The other channel argument is used to indicate to the caller that the function has
 	// completed processing.
-	DoJobFunc(chan bool, chan bool)
+	DoJobFunc(stopCh chan bool, doneCh chan bool)
 }
 
 // acquireKey tries to acquire a consul key. If successful we attain mastership.
@@ -109,9 +109,10 @@ func getSequencer(kv *api.KV, key string) (*sequencer, error) {
 
 // MaybeAcquireLeadership function takes a consul client, KV key string, ttl (in seconds), session name, exit on lock found as well
 // as a DoJob implementation. It tries to acquire a lock by associating a session to the key. If acquired, it attains mastership setting the value of
-// the key to hostname:pid. The DoJobFunc implementation is run in a go routine. The function could run till it ends voluntarily. The api could
+// the key to hostname:pid. The DoJobFunc implementation is run in a go routine. The function could run till it ends voluntarily closing the doneCh channel. The api could
 // could sent a stop signal via the stopCh in case leadership is lost. In such a situation the DoJobFunc implementaion should return.
-// The api leverages the TTL field of sessions. The following text from the consul.io is useful to know.
+// The exitOnLockFound parameter should be set to true in situations where you want your application to exit if lock is found. For continuosly applications
+// needing high availability support this should be set to false. The api leverages the TTL field of sessions. The following text from the consul.io is useful to know.
 //
 // When creating a session, a TTL can be specified. If the TTL interval expires without being renewed, the session has expired and an invalidation is triggered.
 // This type of failure detector is also known as a heartbeat failure detector. It is less scalable than the gossip based failure detector as it places an
@@ -125,7 +126,7 @@ func getSequencer(kv *api.KV, key string) (*sequencer, error) {
 // The purpose of this delay is to allow the potentially still live leader to detect the invalidation and stop processing requests that may lead to inconsistent state.
 // While not a bulletproof method, it does avoid the need to introduce sleep states into application logic and can help mitigate many issues.
 //While the default is to use a 15 second delay, clients are able to disable this mechanism by providing a zero delay value.
-func MaybeAcquireLeadership(client *api.Client, key string, ttl int, sessionName string, onLockFoundExit bool, j DoJob) {
+func MaybeAcquireLeadership(client *api.Client, key string, ttl int, sessionName string, exitOnLockFound bool, j DoJob) {
 	l := leader{}
 	sleepTime := time.Duration(ttl)
 	// buffered to accept if we receive the stop signal.
@@ -164,7 +165,7 @@ func MaybeAcquireLeadership(client *api.Client, key string, ttl int, sessionName
 			// We reached here becoz we could not acquire the key although it is possible that we are still the master.
 			log.Println("Consul leadership lock is already acquired.")
 			removeSession(client, id)
-			if !l.isLeader && onLockFoundExit {
+			if !l.isLeader && exitOnLockFound {
 				log.Println("Exiting...")
 				os.Exit(0)
 			}

@@ -39,5 +39,5 @@ func main() {
 		log.Fatalf("Fatal error: %v", err)
 	}
 	j := myJob{}
-	leader_election.MaybeAcquireLeadership(client, "example/leader", 20, "example", false, j)
+	leader_election.MaybeAcquireLeadership(client, "example/leader", 20, "example", true, j)
 }
