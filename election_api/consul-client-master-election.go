@@ -37,7 +37,7 @@ type DoJob interface {
 	DoJobFunc(stopCh chan bool, doneCh chan bool)
 }
 
-// acquireKey tries to acquire a consul key. If successful we attain mastership.
+// acquireKey tries to acquire a consul leader key. If successful we attain mastership.
 func acquireKey(cl *api.Client, key string, ttl int, sessionName string) (string, *sequencer, bool, error) {
 	session := cl.Session()
 	entry := &api.SessionEntry{
@@ -111,7 +111,7 @@ func getSequencer(kv *api.KV, key string) (*sequencer, error) {
 	return &seq, nil
 }
 
-// MaybeAcquireLeadership function takes a consul client, KV key string, ttl (in seconds), session name, exit on lock found as well
+// MaybeAcquireLeadership function takes a consul client, leader key string, check interval (in seconds), session ttl (in seconds), session name, exit on lock found as well
 // as a DoJob implementation. It tries to acquire a lock by associating a session to the key. If acquired, it attains mastership setting the value of
 // the key to hostname:pid. The DoJobFunc implementation is run in a go routine. The function could run till it ends voluntarily closing the doneCh channel. The api could
 // could sent a stop signal via the stopCh in case leadership is lost. In such a situation the DoJobFunc implementaion should return.
@@ -130,9 +130,9 @@ func getSequencer(kv *api.KV, key string) (*sequencer, error) {
 // The purpose of this delay is to allow the potentially still live leader to detect the invalidation and stop processing requests that may lead to inconsistent state.
 // While not a bulletproof method, it does avoid the need to introduce sleep states into application logic and can help mitigate many issues.
 //While the default is to use a 15 second delay, clients are able to disable this mechanism by providing a zero delay value.
-func MaybeAcquireLeadership(client *api.Client, key string, ttl int, sessionName string, exitOnLockFound bool, j DoJob) {
+func MaybeAcquireLeadership(client *api.Client, leaderKey string, leadershipCheckInterval int, sessionTTL int, sessionName string, exitOnLockFound bool, j DoJob) {
 	l := leader{}
-	sleepTime := time.Duration(ttl)
+	sleepTime := time.Duration(leadershipCheckInterval)
 	// buffered to accept if we receive the stop signal.
 	doneCh := make(chan bool, 1)
 	for {
@@ -141,7 +141,7 @@ func MaybeAcquireLeadership(client *api.Client, key string, ttl int, sessionName
 			log.Println("Received done signal, exiting..")
 			return
 		default:
-			id, seq, success, err := acquireKey(client, key, ttl, sessionName)
+			id, seq, success, err := acquireKey(client, leaderKey, sessionTTL, sessionName)
 			if err != nil {
 				l.errorRetryCount++
 				goto LABEL
@@ -155,7 +155,7 @@ func MaybeAcquireLeadership(client *api.Client, key string, ttl int, sessionName
 
 				stopSessionRenewCh := make(chan struct{})
 				l.stopSessionRenewCh = stopSessionRenewCh
-				go client.Session().RenewPeriodic(strconv.Itoa(ttl)+"s", id, nil, l.stopSessionRenewCh)
+				go client.Session().RenewPeriodic(strconv.Itoa(sessionTTL)+"s", id, nil, l.stopSessionRenewCh)
 				if !l.isLeader {
 					stopCh := make(chan bool)
 					l.stopCh = stopCh
@@ -168,9 +168,9 @@ func MaybeAcquireLeadership(client *api.Client, key string, ttl int, sessionName
 			}
 			// We reached here becoz we could not acquire the key although it is possible that we are still the master.
 			if l.isLeader {
-				log.Println("I still hold the Consul leadership lock.")
+				log.Printf("I still hold the Consul leadership lock.")
 			} else {
-				log.Println("Consul leadership lock is already aquired by some other process.")
+				log.Printf("Consul leadership lock is already aquired by some other process.")
 			}
 			removeSession(client, id)
 			if !l.isLeader && exitOnLockFound {
