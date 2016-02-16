@@ -10,6 +10,10 @@ import (
 	"github.com/hashicorp/consul/api"
 )
 
+const (
+	errorRetryThreshold = 0
+)
+
 // consul sequencer uniquely identifies a lock.
 type sequencer struct {
 	lockIndex uint64
@@ -163,7 +167,11 @@ func MaybeAcquireLeadership(client *api.Client, key string, ttl int, sessionName
 				continue
 			}
 			// We reached here becoz we could not acquire the key although it is possible that we are still the master.
-			log.Println("Consul leadership lock is already acquired.")
+			if l.isLeader {
+				log.Println("I still hold the Consul leadership lock.")
+			} else {
+				log.Println("Consul leadership lock is already aquired by some other process.")
+			}
 			removeSession(client, id)
 			if !l.isLeader && exitOnLockFound {
 				log.Println("Exiting...")
@@ -171,7 +179,7 @@ func MaybeAcquireLeadership(client *api.Client, key string, ttl int, sessionName
 			}
 		LABEL:
 			if l.isLeader {
-				if err != nil && l.errorRetryCount > 0 {
+				if err != nil && l.errorRetryCount > errorRetryThreshold {
 					log.Println("I might have lost leadership. Sending stop signal..")
 					close(l.stopCh)
 					close(l.stopSessionRenewCh)
