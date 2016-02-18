@@ -14,7 +14,7 @@ type myJob struct{}
 func doJobFuncNonHAMode(doneCh chan bool, wg sync.WaitGroup) {
 	defer wg.Done()
 	log.Println("Do some stuff")
-	time.Sleep(5 * time.Minute)
+	time.Sleep(1 * time.Minute)
 	close(doneCh)
 }
 
@@ -39,5 +39,7 @@ func main() {
 		log.Fatalf("Fatal error: %v", err)
 	}
 	job := myJob{}
-	leader_election.MaybeAcquireLeadership(client, "example/leader", 20, 20, "example", true, job)
+	// params as follows.
+	// consul client, leader key, leadership check interval, session ttl, session name, exit on lock found, a DoJob implementation.
+	leader_election.MaybeAcquireLeadership(client, "example/leader", 20, 30, "example", true, job)
 }

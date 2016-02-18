@@ -151,7 +151,7 @@ func MaybeAcquireLeadership(client *api.Client, leaderKey string, leadershipChec
 				if l.isLeader {
 					close(l.stopSessionRenewCh)
 				}
-				log.Println("Consul leadership lock acquired. Assuming leadership. Consul session id: ", id)
+				log.Println("Consul leadership lock acquired. Assuming leadership.")
 
 				stopSessionRenewCh := make(chan struct{})
 				l.stopSessionRenewCh = stopSessionRenewCh
@@ -167,15 +167,15 @@ func MaybeAcquireLeadership(client *api.Client, leaderKey string, leadershipChec
 				continue
 			}
 			// We reached here becoz we could not acquire the key although it is possible that we are still the master.
-			if l.isLeader {
-				log.Printf("I still hold the Consul leadership lock.")
-			} else {
-				log.Printf("Consul leadership lock is already aquired by some other process.")
-			}
 			removeSession(client, id)
 			if !l.isLeader && exitOnLockFound {
-				log.Println("Exiting...")
+				log.Println("Consul leadership lock already acquired by some other process. Exiting...")
 				os.Exit(0)
+			}
+			if l.isLeader {
+				log.Printf("I still hold the consul leadership lock. Checking again in %d secs.", sleepTime)
+			} else {
+				log.Printf("Consul leadership lock is already aquired by some other process. Checking again in %d secs.", sleepTime)
 			}
 		LABEL:
 			if l.isLeader {
