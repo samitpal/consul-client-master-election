@@ -10,9 +10,8 @@ import (
 	"github.com/hashicorp/consul/api"
 )
 
-const (
-	errorRetryThreshold = 0
-)
+const	errorRetryThreshold = 0 // threshold when we consider we have lost leadership.
+
 
 // consul sequencer uniquely identifies a lock.
 type sequencer struct {
