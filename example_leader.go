@@ -38,6 +38,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Fatal error: %v", err)
 	}
-	j := myJob{}
-	leader_election.MaybeAcquireLeadership(client, "example/leader", 20, 20, "example", true, j)
+	job := myJob{}
+	leader_election.MaybeAcquireLeadership(client, "example/leader", 20, 20, "example", true, job)
 }
