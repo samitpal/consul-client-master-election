@@ -33,7 +33,7 @@ type DoJob interface {
 	// DoJobFunc will be called in a go routine. It takes a stop channel which is a signaling mechanism used by the caller
 	// for the function to return. The other channel argument is used to indicate to the caller that the function has
 	// completed processing.
-	DoJobFunc(stopCh chan bool, doneCh chan bool)
+	DoJobFunc(stopCh, doneCh chan bool)
 }
 
 // acquireKey tries to acquire a consul leader key. If successful we attain mastership.
